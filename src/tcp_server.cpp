@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/signal.h>
+#include <sys/wait.h>
 
 #include <cstring>         
 #include <cstdlib> 
@@ -25,16 +26,17 @@
 
 namespace mongols {
 
-    std::atomic_bool tcp_server::done(false);
+    std::atomic_bool tcp_server::done(true);
 
-    void tcp_server::signal_normal_cb(int sig) {
+    void tcp_server::signal_normal_cb(int sig, siginfo_t *, void *) {
         switch (sig) {
             case SIGTERM:
             case SIGHUP:
             case SIGQUIT:
             case SIGINT:
-                tcp_server::done = true;
+                tcp_server::done = false;
                 break;
+            default:break;
         }
     }
 
@@ -43,14 +45,8 @@ namespace mongols {
             , int timeout
             , size_t buffer_size
             , int max_event_size) :
-    epoll(max_event_size, -1)
-    , host(host), port(port), listenfd(0), timeout(timeout), serveraddr()
-    , buffer_size(buffer_size), clients() {
-
-    }
-
-    void tcp_server::run(const handler_function& g) {
-
+    host(host), port(port), listenfd(0), timeout(timeout), max_event_size(max_event_size), serveraddr()
+    , buffer_size(buffer_size), thread_size(0), clients(), work_pool(0) {
         this->listenfd = socket(AF_INET, SOCK_STREAM, 0);
 
         int on = 1;
@@ -75,24 +71,43 @@ namespace mongols {
 
         this->setnonblocking(this->listenfd);
 
-        if (!this->epoll.is_ready()) {
+        listen(this->listenfd, 10);
+
+        const int sig_len = 4;
+        int sigs[sig_len] = {SIGHUP, SIGTERM, SIGINT, SIGQUIT};
+        struct sigaction act;
+        memset(&act, 0, sizeof (struct sigaction));
+        sigemptyset(&act.sa_mask);
+        act.sa_sigaction = tcp_server::signal_normal_cb;
+
+        for (int i = 0; i < sig_len; ++i) {
+            if (sigaction(sigs[i], &act, NULL) < 0) {
+                perror("sigaction error");
+                return;
+            }
+        }
+    }
+
+    tcp_server::~tcp_server() {
+        if (this->work_pool) {
+            delete this->work_pool;
+        }
+    }
+
+    void tcp_server::run(const handler_function& g) {
+
+        mongols::epoll epoll(this->max_event_size, -1);
+        if (!epoll.is_ready()) {
             perror("epoll error");
             return;
         }
-        this->epoll.add(this->listenfd, EPOLLIN | EPOLLET);
-
-
-        listen(this->listenfd, 10);
-
-        signal(SIGHUP, tcp_server::signal_normal_cb);
-        signal(SIGTERM, tcp_server::signal_normal_cb);
-        signal(SIGINT, tcp_server::signal_normal_cb);
-        signal(SIGQUIT, tcp_server::signal_normal_cb);
-
-        auto main_fun = std::bind(&tcp_server::main_loop, this, std::placeholders::_1, std::cref(g));
-
-        while (!tcp_server::done) {
-            this->epoll.loop(main_fun);
+        epoll.add(this->listenfd, EPOLLIN | EPOLLET);
+        auto main_fun = std::bind(&tcp_server::main_loop, this, std::placeholders::_1, std::cref(g), std::ref(epoll));
+        if (this->thread_size > 0) {
+            this->work_pool = new mongols::thread_pool < std::function<bool() >>(this->thread_size);
+        }
+        while (tcp_server::done) {
+            epoll.loop(main_fun);
         }
     }
 
@@ -110,85 +125,80 @@ namespace mongols {
     }
 
     bool tcp_server::send_to_all_client(int fd, const std::string& str, const filter_handler_function& h) {
-        if (fd > 0) {
-            for (auto i = this->clients.begin(); i != this->clients.end();) {
-                if (i->first != fd && h(i->second) && send(i->first, str.c_str(), str.size(), MSG_NOSIGNAL) < 0) {
-                    close(i->first);
-                    this->del_client(i->first);
-                } else {
-                    ++i;
-                }
+        for (auto i = this->clients.begin(); i != this->clients.end();) {
+            if (i->first != fd && h(i->second) && send(i->first, str.c_str(), str.size(), MSG_NOSIGNAL) < 0) {
+                close(i->first);
+                this->del_client(i->first);
+            } else {
+                ++i;
             }
         }
-        return fd > 0 ? false : true;
+        return false;
     }
 
     bool tcp_server::work(int fd, const handler_function& g) {
-        if (fd > 0) {
-            char buffer[this->buffer_size];
+        char buffer[this->buffer_size];
 ev_recv:
-            ssize_t ret = recv(fd, buffer, this->buffer_size, MSG_WAITALL);
-            if (ret == -1) {
-                if (errno == EAGAIN || errno == EINTR) {
-                    goto ev_recv;
+        ssize_t ret = recv(fd, buffer, this->buffer_size, MSG_WAITALL);
+        if (ret == -1) {
+            if (errno == EAGAIN || errno == EINTR) {
+                goto ev_recv;
+            }
+            goto ev_error;
+        } else if (ret > 0) {
+            std::pair<char*, size_t> input;
+            input.first = &buffer[0];
+            input.second = ret;
+            filter_handler_function send_to_other_filter = [](const client_t&) {
+                return true;
+            };
+
+            bool keepalive = CLOSE_CONNECTION, send_to_all = false;
+            client_t& client = this->clients[fd];
+            client.u_size = this->clients.size();
+            std::string output = std::move(g(input, keepalive, send_to_all, client, send_to_other_filter));
+            size_t n = send(fd, output.c_str(), output.size(), MSG_NOSIGNAL);
+            if (n >= 0) {
+                if (send_to_all) {
+                    this->send_to_all_client(fd, output, send_to_other_filter);
                 }
+            }
+
+            if (n < 0 || keepalive == CLOSE_CONNECTION) {
                 goto ev_error;
-            } else if (ret > 0) {
-                std::string input(buffer, ret);
-                filter_handler_function send_to_other_filter = [](const client_t&) {
-                    return true;
-                };
+            }
 
-                bool keepalive = CLOSE_CONNECTION, send_to_all = false;
-                client_t& client = this->clients[fd];
-                client.u_size = this->clients.size();
-                std::string output = std::move(g(input, keepalive, send_to_all, client, send_to_other_filter));
-                size_t n = send(fd, output.c_str(), output.size(), MSG_NOSIGNAL);
-                if (n >= 0) {
-                    if (send_to_all) {
-                        this->send_to_all_client(fd, output, send_to_other_filter);
-                    }
-                }
-
-                if (n < 0 || keepalive == CLOSE_CONNECTION) {
-                    goto ev_error;
-                }
-
-            } else {
+        } else {
 
 ev_error:
-                close(fd);
-                this->del_client(fd);
+            close(fd);
+            this->del_client(fd);
 
-            }
         }
-        return fd > 0 ? false : true;
+
+        return false;
     }
 
     void tcp_server::main_loop(struct epoll_event * event
-            , const handler_function& g) {
-        if ((event->events & EPOLLERR) ||
-                (event->events & EPOLLHUP) ||
-                (!(event->events & EPOLLIN))) {
-            close(event->data.fd);
-        } else if (event->events & EPOLLRDHUP) {
-            close(event->data.fd);
-        } else if (event->data.fd == this->listenfd) {
-            while (!tcp_server::done) {
+            , const handler_function& g
+            , mongols::epoll& epoll) {
+        if (event->data.fd == this->listenfd) {
+            while (tcp_server::done) {
                 struct sockaddr_in clientaddr;
                 socklen_t clilen;
                 int connfd = accept(listenfd, (struct sockaddr*) &clientaddr, &clilen);
                 if (connfd > 0) {
                     this->setnonblocking(connfd);
-                    this->epoll.add(connfd, EPOLLIN | EPOLLRDHUP | EPOLLET);
-
+                    epoll.add(connfd, EPOLLIN | EPOLLRDHUP | EPOLLET);
                     this->add_client(connfd, inet_ntoa(clientaddr.sin_addr), ntohs(clientaddr.sin_port));
                 } else {
                     break;
                 }
             }
-        } else {
+        } else if (event->events & EPOLLIN) {
             this->process(event->data.fd, g);
+        } else {
+            close(event->data.fd);
         }
     }
 

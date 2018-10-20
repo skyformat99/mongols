@@ -10,17 +10,19 @@ namespace mongols {
         web_server() = delete;
         web_server(const std::string& host, int port
                 , int timeout = 5000
-                , size_t buffer_size = 1024
-                , size_t thread_size = 0
-                , size_t max_body_size = 1024
+                , size_t buffer_size = 8092
+                , size_t thread_size = std::thread::hardware_concurrency()
+                , size_t max_body_size = 4096
                 , int max_event_size = 64);
         virtual~web_server();
         void set_root_path(const std::string&);
         void set_mime_type_file(const std::string&);
         void set_list_directory(bool);
         void set_enable_mmap(bool);
+        void set_cache_expires(long long);
         void run(const std::function<bool(const mongols::request&)>& req_filter);
     private:
+        long long cache_expires;
         std::string root_path;
         std::unordered_map<std::string, std::string> mime_type;
         http_server *server;

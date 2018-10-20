@@ -32,7 +32,7 @@ namespace mongols {
         }
     }
 
-    void ws_server::run(const handler_function& f) {
+    void ws_server::run(const message_handler_function& f) {
         this->server->run(std::bind(&ws_server::work, this
                 , std::cref(f)
                 , std::placeholders::_1
@@ -43,7 +43,7 @@ namespace mongols {
     }
 
     void ws_server::run() {
-        handler_function f = std::bind(&ws_server::ws_message_parse, this
+        message_handler_function f = std::bind(&ws_server::ws_json_parse, this
                 , std::placeholders::_1
                 , std::placeholders::_2
                 , std::placeholders::_3
@@ -60,7 +60,7 @@ namespace mongols {
                 ));
     }
 
-    std::string ws_server::ws_message_parse(const std::string& message
+    std::string ws_server::ws_json_parse(const std::string& message
             , bool& keepalive
             , bool& send_to_other
             , tcp_server::client_t& client
@@ -75,11 +75,20 @@ namespace mongols {
                     && root["ufilter"].isArray()
                     && root.isMember("gfilter")
                     && root["ufilter"].isArray()) {
-                if (std::find(client.gid.begin(), client.gid.end(), root["gid"].asUInt64()) == client.gid.end()) {
-                    client.gid.push_back(root["gid"].asInt64());
+                int64_t gid = root["gid"].asInt64(), uid = root["uid"].asInt64();
+                bool gid_is_uint64 = (gid >= 0);
+                std::list<size_t>::iterator gid_iter = std::find(client.gid.begin(), client.gid.end(), (gid_is_uint64 ? gid : -gid));
+                if (gid_iter == client.gid.end()) {
+                    if (gid_is_uint64) {
+                        client.gid.emplace_back(gid);
+                    }
+                } else {
+                    if (!gid_is_uint64) {
+                        client.gid.erase(gid_iter);
+                    }
                 }
-                if (client.uid == 0) {
-                    client.uid = root["uid"].asUInt64();
+                if (client.uid == 0 && uid > 0) {
+                    client.uid = uid;
                 }
                 keepalive = KEEPALIVE_CONNECTION;
                 send_to_other = true;
@@ -88,12 +97,12 @@ namespace mongols {
                 Json::ArrayIndex ufilter_size = ufilter_array.size(), gfilter_size = gfilter_array.size();
                 for (Json::ArrayIndex i = 0; i < ufilter_size; ++i) {
                     if (ufilter_array[i].isUInt64()) {
-                        ufilter.push_back(ufilter_array[i].asUInt64());
+                        ufilter.emplace_back(ufilter_array[i].asUInt64());
                     }
                 }
                 for (Json::ArrayIndex i = 0; i < gfilter_size; ++i) {
                     if (gfilter_array[i].isUInt64()) {
-                        gfilter.push_back(gfilter_array[i].asUInt64());
+                        gfilter.emplace_back(gfilter_array[i].asUInt64());
                     }
                 }
                 send_to_other_filter = [ = ](const tcp_server::client_t & cur_client){
@@ -130,8 +139,8 @@ namespace mongols {
         return message;
     }
 
-    std::string ws_server::work(const handler_function& f
-            , const std::string& input
+    std::string ws_server::work(const message_handler_function& f
+            , const std::pair<char*, size_t>& input
             , bool& keepalive
             , bool& send_to_other
             , tcp_server::client_t& client
@@ -140,7 +149,7 @@ namespace mongols {
         keepalive = KEEPALIVE_CONNECTION;
         send_to_other = false;
 
-        if (input[0] == 'G') {
+        if (input.first[0] == 'G') {
             std::unordered_map<std::string, std::string> headers;
             std::unordered_map<std::string, std::string>::const_iterator headers_iterator;
             if (!this->ws_handshake(input, response, headers)) {
@@ -211,9 +220,9 @@ ws_done:
         return response;
     }
 
-    bool ws_server::ws_handshake(const std::string& request, std::string& response, std::unordered_map<std::string, std::string>& headers) {
+    bool ws_server::ws_handshake(const std::pair<char*, size_t>& request, std::string& response, std::unordered_map<std::string, std::string>& headers) {
         bool ret = false;
-        std::istringstream stream(request.c_str());
+        std::istringstream stream(std::string(request.first, request.second));
         std::string reqType;
         std::getline(stream, reqType);
         if (reqType.substr(0, 4) != "GET ") {
@@ -258,9 +267,9 @@ ws_done:
         return ret;
     }
 
-    int ws_server::ws_parse(const std::string& frame, std::string& message) {
+    int ws_server::ws_parse(const std::pair<char*, size_t>& frame, std::string& message) {
 
-        if (frame.empty()) {
+        if (frame.second == 0) {
             return 0;
         }
 
@@ -309,9 +318,9 @@ ws_done:
         websocket_parser_init(&ws_parser);
         ws_parser.data = &ws_frame;
 
-        size_t nread = websocket_parser_execute(&ws_parser, &ws_settings, frame.c_str(), frame.size());
+        size_t nread = websocket_parser_execute(&ws_parser, &ws_settings, frame.first, frame.second);
 
-        if (nread != frame.size()) {
+        if (nread != frame.second) {
             return -1;
         }
         int ret = 0;

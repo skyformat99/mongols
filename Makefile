@@ -1,13 +1,13 @@
 NAME=mongols
 PROJECT=lib$(NAME).so
-CPPSRC=$(shell find . -type f -name *.cpp | sed -e 's/.*indexer\.cpp$$//')
+CPPSRC=$(shell find src -type f -name *.cpp)
 CPPOBJ=$(patsubst %.cpp,%.o,$(CPPSRC))
-CCSRC=$(shell find . -type f -name *.cc)
+CCSRC=$(shell find src -type f -name *.cc)
 CCOBJ=$(patsubst %.cc,%.o,$(CCSRC))
-CXXSRC=$(shell find . -type f -name *.cxx)
+CXXSRC=$(shell find src -type f -name *.cxx)
 CXXOBJ=$(patsubst %.cxx,%.o,$(CXXSRC))
 
-CSRC=$(shell find . -type f -name *.c | sed -e 's/.*indexer.c$$//')
+CSRC=$(shell find src -type f -name *.c)
 COBJ=$(patsubst %.c,%.o,$(CSRC))
 
 OBJ=$(COBJ) $(CXXOBJ) $(CCOBJ) $(CPPOBJ)
@@ -17,15 +17,31 @@ CXX=g++
 
 CFLAGS+=-O3 -std=c11 -Wall -fPIC
 CFLAGS+=-Iinc/mongols -Iinc/mongols/lib
-CFLAGS+=`pkg-config --cflags libcurl  hiredis openssl`
+CFLAGS+=-Iinc/mongols/lib/lua -Wextra -DLUA_COMPAT_5_2 -DLUA_USE_POSIX
+CFLAGS+=-Iinc/mongols/lib/sqlite  -DSQLITE_THREADSAFE=1 \
+	-DSQLITE_ENABLE_FTS4  \
+	-DSQLITE_ENABLE_FTS5 \
+	-DSQLITE_ENABLE_JSON1  \
+	-DSQLITE_ENABLE_RTREE \
+	-DSQLITE_ENABLE_EXPLAIN_COMMENTS  \
+	-DHAVE_USLEEP \
+	-DHAVE_READLINE
+CFLAGS+=-Iinc/mongols/lib/z
+CFLAGS+=-Iinc/mongols/lib/hash
+
+
 
 CXXFLAGS+=-O3 -std=c++11 -Wall -fPIC 
-CXXFLAGS+=-Iinc/mongols -Iinc/mongols/lib -Isrc/MPFDParser -Iinc/mongols/lib/cpr
+CXXFLAGS+=-Iinc/mongols -Iinc/mongols/lib 
+CXXFLAGS+=-Isrc/MPFDParser
 CXXFLAGS+=-Iinc/mongols/lib/leveldb -Isrc/leveldb -DLEVELDB_PLATFORM_POSIX
-CXXFLAGS+=`pkg-config --cflags libcurl  hiredis openssl`
+CXXFLAGS+= -DKAGUYA_USE_CPP11
+CXXFLAGS+=-Isrc -Isrc/re2 
+CXXFLAGS+=-Iinc/mongols/lib/sqlite
 
 
-LDLIBS+=`pkg-config --libs libcurl hiredis  openssl` -lpcre -lz -lpthread -ldl -lrt -lm -lstdc++
+
+LDLIBS+=-lpthread -ldl -lrt -lm -lstdc++
 LDFLAGS+=-shared
 
 
@@ -37,8 +53,8 @@ endif
 all:$(PROJECT)
 
 $(PROJECT):$(OBJ)
-	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS) 
-
+	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+	
 .c.o:
 	$(CC) $(CFLAGS) -c $< -o $@
 

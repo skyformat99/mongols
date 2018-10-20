@@ -7,36 +7,21 @@
 #include "request.hpp"
 #include "response.hpp"
 #include "http_request_parser.hpp"
-#include "lib/lrucache.hpp"
-#include "lib/redis.hpp"
+#include "lib/leveldb/db.h"
+#include "lib/leveldb/options.h"
+
 
 
 namespace mongols {
 
     class http_server {
     public:
-
-        class cache_t {
-        public:
-            cache_t();
-            cache_t(const std::string&, long long);
-            virtual~cache_t() = default;
-            bool expired()const;
-            const std::string& get()const;
-            cache_t& set_data(const std::string&);
-            cache_t& set_expires(long long);
-        private:
-            std::string data;
-            time_t t;
-            long long expires;
-        };
-    public:
         http_server() = delete;
         http_server(const std::string& host, int port
                 , int timeout = 5000
-                , size_t buffer_size = 1024
-                , size_t thread_size = 0
-                , size_t max_body_size = 1024
+                , size_t buffer_size = 8192
+                , size_t thread_size = std::thread::hardware_concurrency()
+                , size_t max_body_size = 4096
                 , int max_event_size = 64);
         virtual~http_server();
 
@@ -48,27 +33,36 @@ namespace mongols {
         void set_cache_expires(long long);
         void set_enable_session(bool);
         void set_enable_cache(bool);
+        void set_max_open_files(int);
+        void set_write_buffer_size(size_t);
+        void set_max_file_size(size_t);
+        void set_cache_size(size_t);
+        void set_enable_compression(bool);
+        void set_db_path(const std::string&);
     private:
         std::string work(
                 const std::function<bool(const mongols::request&)>& req_filter
                 , const std::function<void(const mongols::request& req, mongols::response&)>& res_filter
-                , const std::string&
+                , const std::pair<char*, size_t>&
                 , bool&
                 , bool&
                 , tcp_server::client_t&
                 , tcp_server::filter_handler_function&);
     private:
-        bool parse_reqeust(const std::string& str, mongols::request& req, std::string& body);
         std::string create_response(mongols::response& res, bool b);
         std::string get_status_text(int status);
         std::string tolower(std::string&);
         void upload(mongols::request&, const std::string&);
+        std::string serialize(const std::unordered_map<std::string, std::string>&);
+        void deserialize(const std::string&, std::unordered_map<std::string, std::string>&);
     private:
         mongols::tcp_server *server;
         size_t max_body_size;
-        mongols::redis redis;
-        long long session_expires, cache_expores;
+        leveldb::DB *db;
+        leveldb::Options db_options;
+        long long session_expires, cache_expires;
         bool enable_session, enable_cache;
+        std::string db_path;
 
 
     };

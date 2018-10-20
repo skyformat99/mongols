@@ -1,7 +1,8 @@
-
-
-
+#include <unistd.h>
+#include <sys/wait.h>
 #include <sys/stat.h>
+#include <sched.h>
+
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstdlib>
@@ -10,34 +11,20 @@
 #include <string>
 #include <cstring>
 #include <fstream>
+#include <iostream>
+#include <thread>
 
-#include <openssl/md5.h>
 
-
+#include "lib/cppcodec/base64_rfc4648.hpp"
+#include "lib/hash/md5.hpp"
 #include "util.hpp"
 
 
 
 
+
+
 namespace mongols {
-
-    std::string md5(const std::string& str) {
-        unsigned char digest[16] = {0};
-        MD5_CTX ctx;
-        MD5_Init(&ctx);
-        MD5_Update(&ctx, str.c_str(), str.size());
-        MD5_Final(digest, &ctx);
-
-        unsigned char tmp[32] = {0}, *dst = &tmp[0], *src = &digest[0];
-        unsigned char hex[] = "0123456789abcdef";
-        int len = 16;
-        while (len--) {
-            *dst++ = hex[*src >> 4];
-            *dst++ = hex[*src++ & 0xf];
-        }
-
-        return std::string((char*) tmp, 32);
-    }
 
     std::string random_string(const std::string& s) {
         time_t now = time(NULL);
@@ -397,58 +384,17 @@ namespace mongols {
         }
     }
 
-    std::string base64_encode(const std::string& str, bool newline) {
-        const char* buffer = str.c_str();
-        size_t length = str.size();
-        BIO *bmem = NULL;
-        BIO *b64 = NULL;
-        BUF_MEM *bptr;
+    std::string regular_expression::INTEGER = R"(^[+-]?[1-9]+[0-9]*$)"
+            , regular_expression::NUMBER = R"(^[+-]?[1-9]+[0-9]*\.?[0-9]*$)"
+            , regular_expression::EMAIL = R"(^[0-9a-zA-Z]+(([-_\.])?[0-9a-zA-Z]+)?\@[0-9a-zA-Z]+[-_]?[0-9a-zA-Z]+(\.[0-9a-zA-Z]+)+$)"
+            , regular_expression::URL = R"(^(http[s]?|ftp)://[0-9a-zA-Z\._-]([0-9a-zA-Z]+/?)+\??.*$)";
 
-        b64 = BIO_new(BIO_f_base64());
-        if (!newline) {
-            BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
-        }
-        bmem = BIO_new(BIO_s_mem());
-        b64 = BIO_push(b64, bmem);
-        BIO_write(b64, buffer, length);
-        BIO_flush(b64);
-        BIO_get_mem_ptr(b64, &bptr);
-        BIO_set_close(b64, BIO_NOCLOSE);
-
-        char buff[bptr->length + 1];
-        memcpy(buff, bptr->data, bptr->length);
-        buff[bptr->length] = 0;
-        BIO_free_all(b64);
-
-        return buff;
+    std::string base64_encode(const std::string& str) {
+        return cppcodec::base64_rfc4648::encode(str.c_str(), str.size());
     }
 
-    std::string base64_decode(const std::string& str, bool newline) {
-        const char* input = str.c_str();
-        size_t length = str.size();
-        BIO *b64 = NULL;
-        BIO *bmem = NULL;
-        char buffer[length];
-        memset(buffer, 0, length);
-        b64 = BIO_new(BIO_f_base64());
-        if (!newline) {
-            BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
-        }
-        bmem = BIO_new_mem_buf(input, length);
-        bmem = BIO_push(b64, bmem);
-        BIO_read(bmem, buffer, length);
-        BIO_free_all(bmem);
-
-        return buffer;
-    }
-
-    std::string sha1(const std::string& str) {
-        SHA_CTX ctx;
-        SHA1_Init(&ctx);
-        SHA1_Update(&ctx, str.c_str(), str.size());
-        unsigned char md[SHA_DIGEST_LENGTH];
-        SHA1_Final(md, &ctx);
-        return std::string((char*) md, SHA_DIGEST_LENGTH);
+    std::string base64_decode(const std::string& str) {
+        return cppcodec::base64_rfc4648::decode<std::string>(str.c_str(), str.size());
     }
 
     std::string bin2hex(const std::string& input) {
@@ -462,4 +408,73 @@ namespace mongols {
 
         return res;
     }
+
+    std::string url_encode(const std::string& str) {
+        std::string new_str;
+        ;
+        char c;
+        int ic;
+        const char* chars = str.c_str();
+        char bufHex[10];
+        int len = strlen(chars);
+
+        for (int i = 0; i < len; i++) {
+            c = chars[i];
+            ic = c;
+            if (c == ' ') new_str += '+';
+            else if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') new_str += c;
+            else {
+                sprintf(bufHex, "%X", c);
+                if (ic < 16)
+                    new_str += "%0";
+                else
+                    new_str += "%";
+                new_str += bufHex;
+            }
+        }
+        return new_str;
+    }
+
+    std::string url_decode(const std::string& str) {
+        std::string ret;
+        char ch;
+        int i, ii, len = str.length();
+
+        for (i = 0; i < len; i++) {
+            if (str[i] != '%') {
+                if (str[i] == '+')
+                    ret += ' ';
+                else
+                    ret += str[i];
+            } else {
+                sscanf(str.substr(i + 1, 2).c_str(), "%x", &ii);
+                ch = static_cast<char> (ii);
+                ret += ch;
+                i = i + 2;
+            }
+        }
+        return ret;
+    }
+
+    void forker(int len, const std::function<void()>& f, std::vector<pid_t>& pids) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            f();
+        } else if (pid > 0) {
+            pids.push_back(pid);
+            if (len > 1) {
+                forker(len - 1, f, pids);
+            }
+        } else {
+            perror("fork error\n");
+        }
+    }
+
+    bool process_bind_cpu(pid_t pid, int cpu) {
+        cpu_set_t set;
+        CPU_ZERO(&set);
+        CPU_SET(cpu, &set);
+        return sched_setaffinity(pid, sizeof (cpu_set_t), &set) == 0;
+    }
+
 }

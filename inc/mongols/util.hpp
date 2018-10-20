@@ -1,20 +1,18 @@
 #ifndef UTIL_HPP
 #define UTIL_HPP
 
-#include <openssl/evp.h>  
-#include <openssl/bio.h>  
-#include <openssl/buffer.h> 
-#include <openssl/sha.h>
 
+#include <functional>
 #include <ctime>
 #include <cstdlib>
+#include <cstdio>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 
 namespace mongols {
-    std::string md5(const std::string& str);
+
 
     std::string random_string(const std::string& s);
 
@@ -56,17 +54,24 @@ namespace mongols {
         }
     };
 
-    static std::string INTEGER = R"(^[+-]?[1-9]+[0-9]*$)"
-            , NUMBER = R"(^[+-]?[1-9]+[0-9]*\.?[0-9]*$)"
-            , EMAIL = R"(^[0-9a-zA-Z]+(([-_\.])?[0-9a-zA-Z]+)?\@[0-9a-zA-Z]+[-_]?[0-9a-zA-Z]+(\.[0-9a-zA-Z]+)+$)"
-            , URL = R"(^(http[s]?|ftp)://[0-9a-zA-Z\._-]([0-9a-zA-Z]+/?)+\??.*$)";
+    struct regular_expression {
+        static std::string INTEGER, NUMBER, EMAIL, URL;
+    };
+
 
     std::string base64_encode(const std::string&, bool = false);
     std::string base64_decode(const std::string&, bool = false);
 
-    std::string sha1(const std::string&);
 
     std::string bin2hex(const std::string&);
+
+    std::string url_encode(const std::string& str);
+
+    std::string url_decode(const std::string& str);
+
+    void forker(int, const std::function<void()>&, std::vector<pid_t>&);
+    
+    bool process_bind_cpu(pid_t pid, int cpu);
 }
 
 #endif /* UTIL_HPP */

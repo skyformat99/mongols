@@ -30,47 +30,49 @@ namespace mongols {
 
     };
 
+    template<typename function_t>
     class thread_pool {
     private:
-        std::atomic_bool done;
-        safe_queue<std::function<bool() > > q;
+        safe_queue<function_t > q;
         std::vector<std::thread> th;
         join_thread joiner;
+        std::atomic_bool done;
 
         void work() {
-            while (!this->done) {
-                std::function<bool() > task;
+            function_t task;
+            while (this->done) {
                 this->q.wait_and_pop(task);
-                if (task()) {
-                    break;
-                };
-                std::this_thread::yield();
+                task();
+            }
+        }
+
+        void shutdown() {
+            this->done = false;
+            for (size_t i = 0; i < this->th.size(); ++i) {
+                this->submit([]() {
+                    return true;
+                });
             }
         }
     public:
 
-        thread_pool(size_t th_size = std::thread::hardware_concurrency()) : done(false), q(), th(), joiner(th) {
+        thread_pool(size_t th_size = std::thread::hardware_concurrency()) : q(), th(), joiner(th), done(true) {
             try {
                 for (size_t i = 0; i < th_size; ++i) {
                     this->th.push_back(std::move(std::thread(std::bind(&thread_pool::work, this))));
                 }
             } catch (...) {
-                this->done = true;
+                this->shutdown();
             }
         }
 
         virtual~thread_pool() {
-            this->done = true;
-            std::function<bool() > task;
-            while (this->q.try_pop(task)) {
-                task();
-            }
+            this->shutdown();
         }
 
-        template<typename F>
-        void submit(F f) {
+        void submit(function_t&& f) {
             if (!this->th.empty()) {
-                this->q.push(f);
+                this->q.push(std::move(f));
             }
         }
 

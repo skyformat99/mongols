@@ -63,7 +63,7 @@ namespace mongols {
 
 
 
-        memset(&this->serveraddr, '\0', sizeof (this->serveraddr));
+        memset(&this->serveraddr, 0, sizeof (this->serveraddr));
         this->serveraddr.sin_family = AF_INET;
         inet_aton(this->host.c_str(), &serveraddr.sin_addr);
         this->serveraddr.sin_port = htons(this->port);
@@ -73,19 +73,6 @@ namespace mongols {
 
         listen(this->listenfd, 10);
 
-        const int sig_len = 4;
-        int sigs[sig_len] = {SIGHUP, SIGTERM, SIGINT, SIGQUIT};
-        struct sigaction act;
-        memset(&act, 0, sizeof (struct sigaction));
-        sigemptyset(&act.sa_mask);
-        act.sa_sigaction = tcp_server::signal_normal_cb;
-
-        for (int i = 0; i < sig_len; ++i) {
-            if (sigaction(sigs[i], &act, NULL) < 0) {
-                perror("sigaction error");
-                return;
-            }
-        }
     }
 
     tcp_server::~tcp_server() {
@@ -95,7 +82,19 @@ namespace mongols {
     }
 
     void tcp_server::run(const handler_function& g) {
+        std::vector<int> sigs = {SIGHUP, SIGTERM, SIGINT, SIGQUIT};
 
+        struct sigaction act;
+        for (size_t i = 0; i < sigs.size(); ++i) {
+            memset(&act, 0, sizeof (struct sigaction));
+            sigemptyset(&act.sa_mask);
+            act.sa_sigaction = tcp_server::signal_normal_cb;
+            act.sa_flags = SA_SIGINFO;
+            if (sigaction(sigs[i], &act, NULL) < 0) {
+                perror("sigaction error");
+                return;
+            }
+        }
         mongols::epoll epoll(this->max_event_size, -1);
         if (!epoll.is_ready()) {
             perror("epoll error");
@@ -141,10 +140,13 @@ namespace mongols {
 ev_recv:
         ssize_t ret = recv(fd, buffer, this->buffer_size, MSG_WAITALL);
         if (ret == -1) {
-            if (errno == EAGAIN || errno == EINTR) {
+            if (errno == EINTR) {
                 goto ev_recv;
+            } else if (errno == EAGAIN) {
+                return false;
+            } else {
+                goto ev_error;
             }
-            goto ev_error;
         } else if (ret > 0) {
             std::pair<char*, size_t> input;
             input.first = &buffer[0];
@@ -196,7 +198,7 @@ ev_error:
                 }
             }
         } else if (event->events & EPOLLIN) {
-            this->process(event->data.fd, g);
+            this->work(event->data.fd, g);
         } else {
             close(event->data.fd);
         }
@@ -206,9 +208,6 @@ ev_error:
         return this->buffer_size;
     }
 
-    void tcp_server::process(int fd, const handler_function& g) {
-        this->work(fd, g);
-    }
 
 
 

@@ -10,10 +10,10 @@ int main(int, char**) {
     int port = 9090;
     const char* host = "127.0.0.1";
     mongols::web_server
-    server(host, port, 5000, 512000, 2/*0*/);
+    server(host, port, 5000, 512000, 0/*2*/);
     server.set_root_path("html");
     server.set_mime_type_file("html/mime.conf");
     server.set_list_directory(true);
-    server.set_enable_mmap(false);
+    server.set_enable_mmap(true);
     server.run(f);
 }

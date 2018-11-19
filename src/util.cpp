@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iostream>
 #include <thread>
+#include <sstream>
 
 
 #include "lib/cppcodec/base64_rfc4648.hpp"
@@ -43,12 +44,12 @@ namespace mongols {
 
     bool is_file(const std::string& s) {
         struct stat st;
-        return stat(s.c_str(), &st) >= 0 && S_ISREG(st.st_mode);
+        return stat(s.c_str(), &st) == 0 && S_ISREG(st.st_mode);
     }
 
     bool is_dir(const std::string& s) {
         struct stat st;
-        return stat(s.c_str(), &st) >= 0 && S_ISDIR(st.st_mode);
+        return stat(s.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
     }
 
     static unsigned mday[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
@@ -384,6 +385,16 @@ namespace mongols {
         }
     }
 
+    std::vector<std::string> split(const std::string& s, char delimiter) {
+        std::vector<std::string> tokens;
+        std::string token;
+        std::istringstream tokenStream(s);
+        while (std::getline(tokenStream, token, delimiter)) {
+            tokens.emplace_back(token);
+        }
+        return tokens;
+    }
+
     std::string regular_expression::INTEGER = R"(^[+-]?[1-9]+[0-9]*$)"
             , regular_expression::NUMBER = R"(^[+-]?[1-9]+[0-9]*\.?[0-9]*$)"
             , regular_expression::EMAIL = R"(^[0-9a-zA-Z]+(([-_\.])?[0-9a-zA-Z]+)?\@[0-9a-zA-Z]+[-_]?[0-9a-zA-Z]+(\.[0-9a-zA-Z]+)+$)"
@@ -400,7 +411,7 @@ namespace mongols {
     std::string bin2hex(const std::string& input) {
         std::string res;
         const char hex[] = "0123456789ABCDEF";
-        for (auto sc : input) {
+        for (auto &sc : input) {
             unsigned char c = static_cast<unsigned char> (sc);
             res += hex[c >> 4];
             res += hex[c & 0xf];
@@ -466,7 +477,7 @@ namespace mongols {
                 forker(len - 1, f, pids);
             }
         } else {
-            perror("fork error\n");
+            perror("fork error.");
         }
     }
 

@@ -10,7 +10,7 @@ if mongols_req:has_form('test') then
         local match=mongols_regex.match('(\\w+)[_:+-](\\w+)',test)
         if #match > 0 then
             local content=''
-            for key,value in ipairs(match) do 
+            for key,value in pairs(match) do 
                 content =content .. 'part '..key ..' = '.. value..'\n'
             end
             mongols_res:content('match: \n'..content)
@@ -19,7 +19,7 @@ if mongols_req:has_form('test') then
         end
     end
 else 
-    mongols_res:content('not found test variable')
+    mongols_res:content(mongols_hash.md5('not found test variable'))
 end
 
 

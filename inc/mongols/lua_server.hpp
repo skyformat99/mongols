@@ -20,6 +20,9 @@ namespace mongols {
         void set_root_path(const std::string& path);
         void set_enable_session(bool);
         void set_enable_cache(bool);
+        void set_enable_lru_cache(bool);
+        void set_enable_bootstrap(bool);
+        void set_lru_cache_expires(long long);
         void set_session_expires(long long);
         void set_max_open_files(int);
         void set_write_buffer_size(size_t);
@@ -30,7 +33,7 @@ namespace mongols {
         kaguya::State vm;
         mongols::http_server *server;
         std::string root_path;
-
+        bool enable_bootstrap;
     private:
         virtual void work(const mongols::request& req, mongols::response& res);
         virtual bool filter(const mongols::request& req);

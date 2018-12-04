@@ -19,7 +19,8 @@
 namespace mongols {
 
     web_server::web_server(const std::string& host, int port, int timeout, size_t buffer_size, size_t thread_size, size_t max_body_size, int max_event_size)
-    : cache_expires(3600), root_path(), mime_type(), file_mmap(), server(0), list_directory(false), enable_mmap(false) {
+    : lru_cache_expires(3600), root_path(), mime_type(), file_mmap()
+    , server(0), list_directory(false), enable_mmap(false), enable_lru_cache(false) {
         this->server = new http_server(host, port, timeout, buffer_size, thread_size, max_body_size, max_event_size);
     }
 
@@ -33,7 +34,9 @@ namespace mongols {
     }
 
     void web_server::run(const std::function<bool(const mongols::request&)>& req_filter) {
-        this->server->set_cache_expires(this->cache_expires);
+        this->server->set_lru_cache_expires(this->lru_cache_expires);
+        this->server->set_enable_lru_cache(this->enable_lru_cache);
+
         if (this->enable_mmap) {
             this->server->run(req_filter, std::bind(&web_server::res_filter_with_mmap, this, std::placeholders::_1
                     , std::placeholders::_2));
@@ -49,7 +52,7 @@ namespace mongols {
         if (stat(path.c_str(), &st) == 0) {
             if (S_ISREG(st.st_mode)) {
                 int ffd = open(path.c_str(), O_RDONLY | O_NONBLOCK);
-                if (ffd > 0) {
+                if (ffd > 0 && posix_fadvise(ffd, 0, 0, POSIX_FADV_SEQUENTIAL) == 0) {
                     char ffd_buffer[st.st_size];
 http_read:
                     if (read(ffd, ffd_buffer, st.st_size) < 0) {
@@ -166,6 +169,10 @@ http_500:
         this->enable_mmap = b;
     }
 
+    void web_server::set_enable_lru_cache(bool b) {
+        this->enable_lru_cache = b;
+    }
+
     void web_server::res_filter_with_mmap(const mongols::request& req, mongols::response& res) {
         std::string path = std::move(this->root_path + req.uri), mmap_key = std::move(mongols::md5(path));
         std::unordered_map<std::string, std::pair<char*, struct stat>>::const_iterator iter;
@@ -191,10 +198,15 @@ http_read:
                             goto http_500;
                         } else {
                             close(ffd);
-                            res.status = 200;
-                            res.headers.find("Content-Type")->second = std::move(this->get_mime_type(path));
-                            res.content.assign(mmap_ptr, st.st_size);
-                            this->file_mmap[mmap_key] = std::move(std::make_pair(mmap_ptr, st));
+                            if (madvise(mmap_ptr, st.st_size, MADV_SEQUENTIAL) == 0) {
+                                res.status = 200;
+                                res.headers.find("Content-Type")->second = std::move(this->get_mime_type(path));
+                                res.content.assign(mmap_ptr, st.st_size);
+                                this->file_mmap[mmap_key] = std::move(std::make_pair(mmap_ptr, st));
+                            } else {
+                                munmap(mmap_ptr, st.st_size);
+                                goto http_500;
+                            }
                         }
                     } else {
 http_500:
@@ -217,8 +229,8 @@ http_500:
         }
     }
 
-    void web_server::set_cache_expires(long long expires) {
-        this->cache_expires = expires;
+    void web_server::set_lru_cache_expires(long long expires) {
+        this->lru_cache_expires = expires;
     }
 
 

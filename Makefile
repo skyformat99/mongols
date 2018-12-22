@@ -17,7 +17,8 @@ CXX=g++
 
 CFLAGS+=-O3 -std=c11 -Wall -fPIC
 CFLAGS+=-Iinc/mongols -Iinc/mongols/lib
-CFLAGS+=-Iinc/mongols/lib/lua -Wextra -DLUA_COMPAT_5_2 -DLUA_USE_POSIX
+CFLAGS+=-Iinc/mongols/lib/lua -Wextra -DLUA_COMPAT_5_2 -DLUA_COMPAT_5_1 -DLUA_USE_LINUX
+CFLAGS+=-DMULTIPLE_THREADS
 CFLAGS+=-Iinc/mongols/lib/sqlite  -DSQLITE_THREADSAFE=1 \
 	-DSQLITE_ENABLE_FTS4  \
 	-DSQLITE_ENABLE_FTS5 \
@@ -29,16 +30,19 @@ CFLAGS+=-Iinc/mongols/lib/sqlite  -DSQLITE_THREADSAFE=1 \
 CFLAGS+=-Iinc/mongols/lib/z
 CFLAGS+=-Iinc/mongols/lib/hash
 CFLAGS+=-Iinc/mongols/lib/WjCryptLib
+CFLAGS+=-Iinc/mongols/lib/dukglue
 
 
 
-CXXFLAGS+=-O3 -std=c++11 -Wall -fPIC 
+CXXFLAGS+=-O3 -std=c++14 -Wall -fPIC 
 CXXFLAGS+=-Iinc/mongols -Iinc/mongols/lib 
 CXXFLAGS+=-Isrc/MPFDParser
 CXXFLAGS+=-Iinc/mongols/lib/leveldb -Isrc/leveldb -DLEVELDB_PLATFORM_POSIX
-CXXFLAGS+= -DKAGUYA_USE_CPP11
+CXXFLAGS+= -DKAGUYA_USE_CPP11 
+CXXFLAGS+= -DCHAISCRIPT_EXTRAS_MATH_SKIP_ADVANCED
 CXXFLAGS+=-Isrc -Isrc/re2 
 CXXFLAGS+=-Iinc/mongols/lib/sqlite
+CXXFLAGS+=-Iinc/mongols/lib/dukglue
 
 
 

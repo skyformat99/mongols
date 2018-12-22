@@ -14,6 +14,8 @@
 #include "lib/msgpack.hpp"
 #include "lib/hash/md5.hpp"
 #include "lib/leveldb/cache.h"
+#include "lib/re2/re2.h"
+#include "lib/re2/stringpiece.h"
 
 #define form_urlencoded_type "application/x-www-form-urlencoded"
 #define form_multipart_type "multipart/form-data"
@@ -33,7 +35,7 @@ namespace mongols {
     : server(0), max_body_size(max_body_size), lru_cache_size(1024), db(0), db_options()
     , session_expires(3600), cache_expires(3600), lru_cache_expires(300)
     , enable_session(false), enable_cache(false), enable_lru_cache(false)
-    , db_path(LEVELDB_PATH), lru_cache(0) {
+    , db_path(LEVELDB_PATH), uri_rewrite_config(), lru_cache(0) {
         if (thread_size > 0) {
             this->server = new tcp_threading_server(host, port, timeout, buffer_size, thread_size, max_event_size);
         } else {
@@ -209,6 +211,12 @@ namespace mongols {
                 return this->create_response(res, keepalive);
             }
             if (req_filter(req)) {
+                for (auto& rewrite_pattern : this->uri_rewrite_config) {
+                    if (RE2::Replace(&req.uri, rewrite_pattern.first, rewrite_pattern.second)) {
+                        break;
+                    }
+                }
+
                 if ((tmp_iterator = req.headers.find("Connection")) != req.headers.end()) {
                     if (tmp_iterator->second == "keep-alive") {
                         keepalive = KEEPALIVE_CONNECTION;
@@ -223,7 +231,7 @@ namespace mongols {
                     return this->create_response(res, keepalive);
                 }
                 std::string cache_k = std::move(mongols::md5(req.method + req.uri + "?" + req.param));
-                if (req.method == "GET" && this->enable_lru_cache) {
+                if (this->enable_lru_cache && req.method == "GET") {
                     if (this->lru_cache->contains(cache_k)) {
                         auto cache_ele = this->lru_cache->get(cache_k);
                         if (cache_ele->expired(this->lru_cache_expires)) {
@@ -318,7 +326,7 @@ namespace mongols {
                     }
                     this->db->Put(leveldb::WriteOptions(), cache_k, this->serialize(*ptr));
                 }
-                if (req.method == "GET" && this->enable_lru_cache && res.status == 200 && this->lru_cache_expires > 0) {
+                if (this->enable_lru_cache && this->lru_cache_expires > 0 && req.method == "GET" && res.status == 200) {
                     std::shared_ptr<cache_t> cache_ele = std::make_shared<cache_t>();
                     cache_ele->content = res.content;
                     cache_ele->status = res.status;
@@ -375,6 +383,10 @@ namespace mongols {
 
     void http_server::set_db_path(const std::string& path) {
         this->db_path = path;
+    }
+
+    void http_server::set_uri_rewrite(const std::pair<std::string, std::string>& p) {
+        this->uri_rewrite_config.push_back(p);
     }
 
     void http_server::set_enable_lru_cache(bool b) {

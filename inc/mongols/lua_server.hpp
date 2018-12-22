@@ -23,20 +23,32 @@ namespace mongols {
         void set_enable_lru_cache(bool);
         void set_enable_bootstrap(bool);
         void set_lru_cache_expires(long long);
+        void set_lru_cache_size(size_t);
         void set_session_expires(long long);
         void set_max_open_files(int);
         void set_write_buffer_size(size_t);
         void set_max_file_size(size_t);
         void set_db_path(const std::string&);
+        void set_uri_rewrite(const std::pair<std::string, std::string>&);
         void run(const std::string& package_path, const std::string& package_cpath);
+
+        template <typename class_type, typename base_class_type = void>
+        void set_class(const kaguya::UserdataMetatable<class_type, base_class_type>& cls, const std::string& name) {
+            this->vm[name].setClass(cls);
+        }
+
+        template<typename T>
+        void set_function(T f, const std::string& name) {
+            this->vm[name].setFunction(f);
+        }
     private:
         kaguya::State vm;
         mongols::http_server *server;
         std::string root_path;
         bool enable_bootstrap;
     private:
-        virtual void work(const mongols::request& req, mongols::response& res);
-        virtual bool filter(const mongols::request& req);
+        void work(const mongols::request& req, mongols::response& res);
+        bool filter(const mongols::request& req);
     };
 }
 

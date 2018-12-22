@@ -27,11 +27,11 @@
 namespace mongols {
 
     std::atomic_bool tcp_server::done(true);
+    int tcp_server::backlog = 511;
 
     void tcp_server::signal_normal_cb(int sig, siginfo_t *, void *) {
         switch (sig) {
             case SIGTERM:
-            case SIGHUP:
             case SIGQUIT:
             case SIGINT:
                 tcp_server::done = false;
@@ -71,7 +71,7 @@ namespace mongols {
 
         this->setnonblocking(this->listenfd);
 
-        listen(this->listenfd, 10);
+        listen(this->listenfd, tcp_server::backlog);
 
     }
 
@@ -91,7 +91,7 @@ namespace mongols {
     }
 
     void tcp_server::run(const handler_function& g) {
-        std::vector<int> sigs = {SIGHUP, SIGTERM, SIGINT, SIGQUIT};
+        std::vector<int> sigs = {SIGTERM, SIGINT, SIGQUIT};
 
         struct sigaction act;
         for (size_t i = 0; i < sigs.size(); ++i) {

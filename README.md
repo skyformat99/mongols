@@ -7,7 +7,7 @@ Libevent, libev and libuv are outdated.
 
 - linux
 - gcc (-std=c11)
-- g++ (-std=c++11)
+- g++ (-std=c++14)
 
 
 ## feature
@@ -20,6 +20,8 @@ epoll or epoll + multi-threading + multi-process
 - lua server
 - sqlite server
 - medis_server (like redis but support sqlite and leveldb)
+- javascript server
+- chaiscript server
 - utils
 
 
@@ -54,7 +56,7 @@ result: `{"error":null,"result":[{"id":1,"name":"a"},{"id":2,"name":"b"},{"id":3
 
 ## benchmark
 
-2 core,4 GB,linux mint 18,2 thread:
+2 core,4 GB,linux mint 18:
 
 ### http
 
